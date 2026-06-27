@@ -1,5 +1,4 @@
 import {
-  Activity,
   BarChart3,
   Check,
   Copy,
@@ -9,6 +8,7 @@ import {
   Play,
   Plus,
   Terminal,
+  TestTube2,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -310,7 +310,7 @@ export function ProviderActions({
           variant="ghost"
           onClick={onTest || undefined}
           disabled={isTesting}
-          title={t("provider.connectivityCheck", "检测连通")}
+          title={t("modelTest.testProvider", "测试模型")}
           className={cn(
             iconButtonClass,
             !onTest && "opacity-40 cursor-not-allowed text-muted-foreground",
@@ -319,7 +319,7 @@ export function ProviderActions({
           {isTesting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Activity className="h-4 w-4" />
+            <TestTube2 className="h-4 w-4" />
           )}
         </Button>
 
