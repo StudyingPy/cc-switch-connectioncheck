@@ -1,7 +1,7 @@
 name: Release (Windows)
 
 # 精简版 Windows 发布构建：手动触发或推送 v* tag 触发。
-# 只构建 Windows x64 + arm64，跳过所有代码签名（fork 无 signing secrets）。
+# 只构建 Windows x64，跳过所有代码签名（fork 无 signing secrets）。
 # 通过 --config 覆盖关闭 createUpdaterArtifacts，避免 Tauri 要求 signing key。
 
 on:
@@ -19,15 +19,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            arch: x86_64
-          - os: windows-11-arm
-            arch: arm64
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -41,72 +33,32 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Add Windows ARM64 target
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: rustup target add aarch64-pc-windows-msvc
-
       - name: Setup pnpm
-        if: matrix.arch != 'arm64'
         uses: pnpm/action-setup@v6
         with:
           version: 10.12.3
           run_install: false
 
-      - name: Setup pnpm (Windows ARM64)
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          corepack enable
-          corepack prepare pnpm@10.12.3 --activate
-          node --version
-          pnpm --version
-
-      - name: Setup LLVM for Windows ARM64
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $llvmRoot = 'C:\Program Files\LLVM'
-          if (-not (Test-Path $llvmRoot)) {
-            throw "LLVM not found at $llvmRoot"
-          }
-          $llvmBin = Join-Path $llvmRoot 'bin'
-          "LIBCLANG_PATH=$llvmBin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "CLANG_PATH=$(Join-Path $llvmBin 'clang.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $llvmBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri App (Windows x64)
-        if: matrix.arch != 'arm64'
         shell: pwsh
         run: pnpm tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
 
-      - name: Build Tauri App (Windows ARM64)
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: pnpm tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
-
       - name: Prepare Windows Assets
         shell: pwsh
-        env:
-          WINDOWS_RELEASE_ARCH: ${{ matrix.arch }}
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           $VERSION = $env:GITHUB_REF_NAME
           if ([string]::IsNullOrEmpty($VERSION)) { $VERSION = 'dev' }
-          $isArm64 = $env:WINDOWS_RELEASE_ARCH -eq 'arm64'
-          $targetRoot = if ($isArm64) { 'src-tauri/target/aarch64-pc-windows-msvc/release' } else { 'src-tauri/target/release' }
-          $assetSuffix = if ($isArm64) { '-arm64' } else { '' }
+          $targetRoot = 'src-tauri/target/release'
 
           # MSI 安装器
           $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/msi') -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -ne $msi) {
-            $dest = "CC-Switch-$VERSION-Windows$assetSuffix.msi"
+            $dest = "CC-Switch-$VERSION-Windows.msi"
             Copy-Item $msi.FullName (Join-Path release-assets $dest)
             Write-Host "MSI copied: $dest"
           } else {
@@ -116,7 +68,7 @@ jobs:
           # NSIS 安装器
           $nsis = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/nsis') -Recurse -Include *-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -ne $nsis) {
-            $dest = "CC-Switch-$VERSION-Windows$assetSuffix-setup.exe"
+            $dest = "CC-Switch-$VERSION-Windows-setup.exe"
             Copy-Item $nsis.FullName (Join-Path release-assets $dest)
             Write-Host "NSIS setup copied: $dest"
           } else {
@@ -124,23 +76,18 @@ jobs:
           }
 
           # 绿色版（portable）：仅可执行文件打 zip
-          $exePath = if ($isArm64) {
-            'src-tauri/target/aarch64-pc-windows-msvc/release/cc-switch.exe'
-          } else {
-            'src-tauri/target/release/cc-switch.exe'
-          }
+          $exePath = 'src-tauri/target/release/cc-switch.exe'
           if (Test-Path $exePath) {
             $portableDir = 'release-assets/CC-Switch-Portable'
             New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
             Copy-Item $exePath $portableDir
             $portableIniPath = Join-Path $portableDir 'portable.ini'
             $portableContent = @('# CC Switch portable build marker', 'portable=true')
-            if ($isArm64) { $portableContent += 'arch=arm64' }
             $portableContent | Set-Content -Path $portableIniPath -Encoding UTF8
-            $portableZip = "release-assets/CC-Switch-$VERSION-Windows$assetSuffix-Portable.zip"
+            $portableZip = "release-assets/CC-Switch-$VERSION-Windows-Portable.zip"
             Compress-Archive -Path "$portableDir/*" -DestinationPath $portableZip -Force
             Remove-Item -Recurse -Force $portableDir
-            Write-Host "Portable zip created: CC-Switch-$VERSION-Windows$assetSuffix-Portable.zip"
+            Write-Host "Portable zip created: CC-Switch-$VERSION-Windows-Portable.zip"
           } else {
             Write-Warning "Portable exe not found at $exePath"
           }
@@ -152,7 +99,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: release-assets-windows-${{ matrix.arch }}
+          name: release-assets-windows-x86_64
           path: release-assets/*
           if-no-files-found: error
 
@@ -189,7 +136,6 @@ jobs:
             ### 下载（Windows）
 
             - **x86_64**: `CC-Switch-${{ github.ref_name }}-Windows-setup.exe`（NSIS 安装版）/ `.msi`（MSI 安装版）/ `-Portable.zip`（绿色版，解压即用）
-            - **ARM64**: `CC-Switch-${{ github.ref_name }}-Windows-arm64-setup.exe` / `.msi` / `-arm64-Portable.zip`
 
             > 本版本未做代码签名，Windows SmartScreen 可能提示"未知发布者"，选择"仍要运行"即可。
           files: release-assets/*
