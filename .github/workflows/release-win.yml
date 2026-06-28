@@ -44,7 +44,11 @@ jobs:
 
       - name: Build Tauri App (Windows x64)
         shell: pwsh
-        run: pnpm tauri build --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 用配置文件而非内联 JSON，避免 pwsh 把 --config 参数里的引号拆碎
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Out-File -FilePath ci-tauri.conf.json -Encoding utf8
+          pnpm tauri build --config ci-tauri.conf.json
 
       - name: Prepare Windows Assets
         shell: pwsh
