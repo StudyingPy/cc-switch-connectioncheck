@@ -92,6 +92,10 @@ jobs:
             Compress-Archive -Path "$portableDir/*" -DestinationPath $portableZip -Force
             Remove-Item -Recurse -Force $portableDir
             Write-Host "Portable zip created: CC-Switch-$VERSION-Windows-Portable.zip"
+
+            # 替换版：保留原名的裸 exe，已装过 cc-switch 的用户直接覆盖同名文件即可升级
+            Copy-Item $exePath 'release-assets/cc-switch.exe'
+            Write-Host 'Replacement exe copied: cc-switch.exe'
           } else {
             Write-Warning "Portable exe not found at $exePath"
           }
@@ -140,6 +144,7 @@ jobs:
             ### 下载（Windows）
 
             - **x86_64**: `CC-Switch-${{ github.ref_name }}-Windows-setup.exe`（NSIS 安装版）/ `.msi`（MSI 安装版）/ `-Portable.zip`（绿色版，解压即用）
+            - **替换版**: `cc-switch.exe` — 已在用 cc-switch（官方版或绿色版）的用户，下载后直接覆盖原目录下的同名 `cc-switch.exe` 即可切换到本版本，配置不受影响，无需重新解压安装
 
             > 本版本未做代码签名，Windows SmartScreen 可能提示"未知发布者"，选择"仍要运行"即可。
           files: release-assets/*
