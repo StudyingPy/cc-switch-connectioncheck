@@ -31,7 +31,7 @@ pub enum HealthStatus {
 
 /// 流式检查配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct StreamCheckConfig {
     pub timeout_secs: u64,
     pub max_retries: u32,
@@ -251,20 +251,40 @@ impl StreamCheckService {
                     provider,
                     claude_api_format_override.as_deref(),
                     None,
+                    false,
                 )
                 .await
             }
             AppType::Codex => {
-                Self::check_codex_stream(
-                    &client,
-                    &base_url,
-                    &auth,
-                    &model_to_test,
-                    test_prompt,
-                    request_timeout,
-                    provider,
-                )
-                .await
+                if crate::proxy::providers::codex_provider_uses_anthropic(provider) {
+                    // Codex always speaks Responses to the local proxy, but an Anthropic
+                    // provider's real upstream expects /v1/messages. Probe that upstream
+                    // protocol directly so the health check matches the production bridge.
+                    Self::check_claude_stream(
+                        &client,
+                        &base_url,
+                        &auth,
+                        &model_to_test,
+                        test_prompt,
+                        request_timeout,
+                        provider,
+                        Some("anthropic"),
+                        None,
+                        true,
+                    )
+                    .await
+                } else {
+                    Self::check_codex_stream(
+                        &client,
+                        &base_url,
+                        &auth,
+                        &model_to_test,
+                        test_prompt,
+                        request_timeout,
+                        provider,
+                    )
+                    .await
+                }
             }
             AppType::Gemini => {
                 Self::check_gemini_stream(
@@ -318,6 +338,8 @@ impl StreamCheckService {
     /// `extra_headers` 是一个可选的供应商级自定义 header 集合（从 OpenClaw
     /// 的 `settings_config.headers` 或 OpenCode 的 `settings_config.options.headers`
     /// 读取），在所有内置 header 之后追加，用于覆盖或补充（例如自定义 User-Agent）。
+    /// `codex_anthropic_probe` 仅用于 Codex→Anthropic 桥接，确保探测遵循该路径的
+    /// Claude Code 伪装开关，而不改变原有 Claude/OpenClaw/OpenCode 探测指纹。
     #[allow(clippy::too_many_arguments)]
     async fn check_claude_stream(
         client: &Client,
@@ -329,9 +351,14 @@ impl StreamCheckService {
         provider: &Provider,
         claude_api_format_override: Option<&str>,
         extra_headers: Option<&serde_json::Map<String, serde_json::Value>>,
+        codex_anthropic_probe: bool,
     ) -> Result<(u16, String), AppError> {
         let base = base_url.trim_end_matches('/');
         let is_github_copilot = auth.strategy == AuthStrategy::GitHubCopilot;
+        let configured_model = model.trim();
+        let upstream_model =
+            crate::proxy::model_mapper::strip_one_m_suffix_for_upstream(configured_model);
+        let uses_one_m_context = upstream_model != configured_model;
 
         // Detect api_format: meta.api_format > settings_config.api_format > default "anthropic"
         let api_format = provider
@@ -356,23 +383,35 @@ impl StreamCheckService {
         let is_openai_chat = effective_api_format == "openai_chat";
         let is_openai_responses = effective_api_format == "openai_responses";
         let is_gemini_native = effective_api_format == "gemini_native";
+        let impersonate_claude_code = codex_anthropic_probe
+            && provider
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.impersonate_claude_code)
+                == Some(true);
         let url = Self::resolve_claude_stream_url(
             base,
             auth.strategy,
             effective_api_format,
             is_full_url,
-            model,
+            upstream_model,
         );
 
         let max_tokens = if is_openai_responses { 16 } else { 1 };
 
         // Build from Anthropic-native shape first, then convert for configured targets.
-        let anthropic_body = json!({
-            "model": model,
+        let mut anthropic_body = json!({
+            "model": upstream_model,
             "max_tokens": max_tokens,
             "messages": [{ "role": "user", "content": test_prompt }],
             "stream": true
         });
+        if impersonate_claude_code {
+            anthropic_body["system"] = json!([{
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI for Claude."
+            }]);
+        }
         // Codex OAuth (ChatGPT Plus/Pro 反代) 需要 store:false + include 标记，
         // 否则 Stream Check 会和生产路径一样被服务端 400 拒绝。
         let is_codex_oauth = provider.is_codex_oauth();
@@ -449,10 +488,6 @@ impl StreamCheckService {
                 .header("accept", "text/event-stream")
                 .header("accept-encoding", "identity");
         } else {
-            // Anthropic native: full Claude CLI headers
-            let os_name = Self::get_os_name();
-            let arch_name = Self::get_arch_name();
-
             // 鉴权头复用 ClaudeAdapter::get_auth_headers，与代理路径（forwarder）保持单一真理来源。
             // - AuthStrategy::Anthropic  → x-api-key
             // - AuthStrategy::ClaudeAuth → Authorization: Bearer
@@ -466,32 +501,56 @@ impl StreamCheckService {
             }
 
             request_builder = request_builder
-                // Anthropic required headers
                 .header("anthropic-version", "2023-06-01")
-                .header(
-                    "anthropic-beta",
-                    "claude-code-20250219,interleaved-thinking-2025-05-14",
-                )
-                .header("anthropic-dangerous-direct-browser-access", "true")
-                // Content type headers
                 .header("content-type", "application/json")
                 .header("accept", "application/json")
-                .header("accept-encoding", "identity")
-                .header("accept-language", "*")
-                // Client identification headers
-                .header("user-agent", "claude-cli/2.1.2 (external, cli)")
-                .header("x-app", "cli")
-                // x-stainless SDK headers (dynamic local system info)
-                .header("x-stainless-lang", "js")
-                .header("x-stainless-package-version", "0.70.0")
-                .header("x-stainless-os", os_name)
-                .header("x-stainless-arch", arch_name)
-                .header("x-stainless-runtime", "node")
-                .header("x-stainless-runtime-version", "v22.20.0")
-                .header("x-stainless-retry-count", "0")
-                .header("x-stainless-timeout", "600")
-                // Other headers
-                .header("sec-fetch-mode", "cors");
+                .header("accept-encoding", "identity");
+
+            if codex_anthropic_probe {
+                // Match the production Codex→Anthropic bridge. Claude Code
+                // fingerprinting is opt-in, while the [1m] beta is independent.
+                let mut anthropic_betas = Vec::new();
+                if impersonate_claude_code {
+                    anthropic_betas.push("claude-code-20250219");
+                }
+                if uses_one_m_context {
+                    anthropic_betas.push("context-1m-2025-08-07");
+                }
+                if !anthropic_betas.is_empty() {
+                    request_builder =
+                        request_builder.header("anthropic-beta", anthropic_betas.join(","));
+                }
+                if impersonate_claude_code {
+                    request_builder = request_builder
+                        .header("user-agent", "claude-cli/1.0.119 (external, cli)")
+                        .header("x-app", "cli");
+                }
+            } else {
+                // Existing Claude/OpenClaw/OpenCode probes retain the full Claude
+                // CLI fingerprint used by the restored real-request checker.
+                let os_name = Self::get_os_name();
+                let arch_name = Self::get_arch_name();
+                let mut anthropic_betas =
+                    vec!["claude-code-20250219", "interleaved-thinking-2025-05-14"];
+                if uses_one_m_context {
+                    anthropic_betas.push("context-1m-2025-08-07");
+                }
+                request_builder = request_builder
+                    .header("anthropic-beta", anthropic_betas.join(","))
+                    .header("anthropic-dangerous-direct-browser-access", "true")
+                    .header("accept-language", "*")
+                    .header("user-agent", "claude-cli/2.1.2 (external, cli)")
+                    .header("x-app", "cli")
+                    .header("x-stainless-lang", "js")
+                    .header("x-stainless-package-version", "0.70.0")
+                    .header("x-stainless-os", os_name)
+                    .header("x-stainless-arch", arch_name)
+                    .header("x-stainless-runtime", "node")
+                    .header("x-stainless-runtime-version", "v22.20.0")
+                    .header("x-stainless-retry-count", "0")
+                    .header("x-stainless-timeout", "600")
+                    .header("sec-fetch-mode", "cors");
+            }
         }
 
         // 供应商自定义 headers 最后追加，允许覆盖内置默认值（例如 user-agent）
@@ -565,7 +624,10 @@ impl StreamCheckService {
         };
 
         // 解析模型名和推理等级 (支持 model@level 或 model#level 格式)
-        let (actual_model, reasoning_effort) = Self::parse_model_with_effort(model);
+        let (configured_model, reasoning_effort) = Self::parse_model_with_effort(model);
+        let actual_model =
+            crate::proxy::model_mapper::strip_one_m_suffix_for_upstream(&configured_model)
+                .to_string();
 
         // 获取本地系统信息
         let os_name = Self::get_os_name();
@@ -927,6 +989,7 @@ impl StreamCheckService {
                     provider,
                     Some("openai_chat"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -942,6 +1005,7 @@ impl StreamCheckService {
                     provider,
                     Some("openai_responses"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -960,6 +1024,7 @@ impl StreamCheckService {
                     provider,
                     Some("anthropic"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -1157,6 +1222,7 @@ impl StreamCheckService {
             provider,
             Some(api_format),
             None,
+            false,
         )
         .await
     }
@@ -1199,6 +1265,7 @@ impl StreamCheckService {
                     provider,
                     Some("openai_chat"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -1214,6 +1281,7 @@ impl StreamCheckService {
                     provider,
                     Some("openai_responses"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -1231,6 +1299,7 @@ impl StreamCheckService {
                     provider,
                     Some("anthropic"),
                     extra_headers,
+                    false,
                 )
                 .await
             }
@@ -1425,9 +1494,9 @@ impl StreamCheckService {
                 Self::extract_env_model(provider, "ANTHROPIC_MODEL")
                     .unwrap_or_else(|| config.claude_model.clone())
             }
-            AppType::Codex => {
-                Self::extract_codex_model(provider).unwrap_or_else(|| config.codex_model.clone())
-            }
+            AppType::Codex => crate::proxy::providers::codex_provider_upstream_model(provider)
+                .or_else(|| Self::extract_codex_model(provider))
+                .unwrap_or_else(|| config.codex_model.clone()),
             AppType::Gemini => Self::extract_env_model(provider, "GEMINI_MODEL")
                 .unwrap_or_else(|| config.gemini_model.clone()),
             AppType::OpenCode => {
@@ -1533,8 +1602,14 @@ impl StreamCheckService {
             return resolve_gemini_native_url(base_url, &endpoint, is_full_url);
         }
 
+        let endpoint_suffix = match api_format {
+            "openai_responses" => "/responses",
+            "openai_chat" => "/chat/completions",
+            _ => "/messages",
+        };
+        let is_full_url = is_full_url || Self::base_url_is_full_endpoint(base_url, endpoint_suffix);
         if is_full_url {
-            return base_url.to_string();
+            return base_url.trim().to_string();
         }
 
         let base = base_url.trim_end_matches('/');
@@ -1561,6 +1636,19 @@ impl StreamCheckService {
         } else {
             format!("{base}/v1/messages")
         }
+    }
+
+    /// Detect a pasted full endpoint even when the provider's full-URL switch is off.
+    /// Query strings, fragments, whitespace, and a trailing slash do not hide the suffix.
+    fn base_url_is_full_endpoint(base_url: &str, endpoint_suffix: &str) -> bool {
+        let trimmed = base_url.trim();
+        let path = match trimmed.find(['?', '#']) {
+            Some(index) => &trimmed[..index],
+            None => trimmed,
+        };
+        path.trim_end_matches('/')
+            .to_ascii_lowercase()
+            .ends_with(endpoint_suffix)
     }
 
     /// Codex Responses 流式 URL 构造（薄包装，详见 `resolve_codex_endpoint_urls`）。
@@ -1635,6 +1723,40 @@ mod tests {
             settings_config,
             None,
         )
+    }
+
+    #[test]
+    fn test_legacy_reachability_config_uses_real_probe_defaults() {
+        let config: StreamCheckConfig = serde_json::from_value(serde_json::json!({
+            "timeoutSecs": 8,
+            "maxRetries": 1,
+            "degradedThresholdMs": 6000
+        }))
+        .unwrap();
+
+        assert_eq!(config.timeout_secs, 8);
+        assert_eq!(config.max_retries, 1);
+        assert_eq!(config.claude_model, "claude-haiku-4-5-20251001");
+        assert_eq!(config.codex_model, "gpt-5.5@low");
+        assert_eq!(config.gemini_model, "gemini-3.5-flash");
+        assert_eq!(config.test_prompt, "Who are you?");
+    }
+
+    #[test]
+    fn test_codex_test_model_prefers_provider_upstream_model() {
+        let provider = make_provider(serde_json::json!({
+            "model": "claude-sonnet-5[1m]",
+            "config": "model = \"catalog-alias\""
+        }));
+
+        assert_eq!(
+            StreamCheckService::resolve_test_model(
+                &AppType::Codex,
+                &provider,
+                &StreamCheckConfig::default(),
+            ),
+            "claude-sonnet-5[1m]"
+        );
     }
 
     #[test]
@@ -2030,6 +2152,19 @@ mod tests {
         );
 
         assert_eq!(url, "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn test_resolve_claude_stream_url_recognizes_full_anthropic_endpoint() {
+        let url = StreamCheckService::resolve_claude_stream_url(
+            " https://relay.example/v1/messages/?beta=true#probe ",
+            AuthStrategy::Bearer,
+            "anthropic",
+            false,
+            "claude-sonnet-5",
+        );
+
+        assert_eq!(url, "https://relay.example/v1/messages/?beta=true#probe");
     }
 
     #[test]
