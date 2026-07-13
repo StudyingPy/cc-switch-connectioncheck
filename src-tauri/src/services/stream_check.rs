@@ -530,10 +530,8 @@ impl StreamCheckService {
                 // CLI fingerprint used by the restored real-request checker.
                 let os_name = Self::get_os_name();
                 let arch_name = Self::get_arch_name();
-                let mut anthropic_betas = vec![
-                    "claude-code-20250219",
-                    "interleaved-thinking-2025-05-14",
-                ];
+                let mut anthropic_betas =
+                    vec!["claude-code-20250219", "interleaved-thinking-2025-05-14"];
                 if uses_one_m_context {
                     anthropic_betas.push("context-1m-2025-08-07");
                 }
@@ -627,10 +625,9 @@ impl StreamCheckService {
 
         // 解析模型名和推理等级 (支持 model@level 或 model#level 格式)
         let (configured_model, reasoning_effort) = Self::parse_model_with_effort(model);
-        let actual_model = crate::proxy::model_mapper::strip_one_m_suffix_for_upstream(
-            &configured_model,
-        )
-        .to_string();
+        let actual_model =
+            crate::proxy::model_mapper::strip_one_m_suffix_for_upstream(&configured_model)
+                .to_string();
 
         // 获取本地系统信息
         let os_name = Self::get_os_name();
@@ -1497,11 +1494,9 @@ impl StreamCheckService {
                 Self::extract_env_model(provider, "ANTHROPIC_MODEL")
                     .unwrap_or_else(|| config.claude_model.clone())
             }
-            AppType::Codex => {
-                crate::proxy::providers::codex_provider_upstream_model(provider)
-                    .or_else(|| Self::extract_codex_model(provider))
-                    .unwrap_or_else(|| config.codex_model.clone())
-            }
+            AppType::Codex => crate::proxy::providers::codex_provider_upstream_model(provider)
+                .or_else(|| Self::extract_codex_model(provider))
+                .unwrap_or_else(|| config.codex_model.clone()),
             AppType::Gemini => Self::extract_env_model(provider, "GEMINI_MODEL")
                 .unwrap_or_else(|| config.gemini_model.clone()),
             AppType::OpenCode => {
@@ -1612,8 +1607,7 @@ impl StreamCheckService {
             "openai_chat" => "/chat/completions",
             _ => "/messages",
         };
-        let is_full_url = is_full_url
-            || Self::base_url_is_full_endpoint(base_url, endpoint_suffix);
+        let is_full_url = is_full_url || Self::base_url_is_full_endpoint(base_url, endpoint_suffix);
         if is_full_url {
             return base_url.trim().to_string();
         }
@@ -2170,10 +2164,7 @@ mod tests {
             "claude-sonnet-5",
         );
 
-        assert_eq!(
-            url,
-            "https://relay.example/v1/messages/?beta=true#probe"
-        );
+        assert_eq!(url, "https://relay.example/v1/messages/?beta=true#probe");
     }
 
     #[test]
