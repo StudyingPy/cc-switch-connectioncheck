@@ -1642,7 +1642,7 @@ impl StreamCheckService {
     /// Query strings, fragments, whitespace, and a trailing slash do not hide the suffix.
     fn base_url_is_full_endpoint(base_url: &str, endpoint_suffix: &str) -> bool {
         let trimmed = base_url.trim();
-        let path = match trimmed.find(|ch| ch == '?' || ch == '#') {
+        let path = match trimmed.find(['?', '#']) {
             Some(index) => &trimmed[..index],
             None => trimmed,
         };
