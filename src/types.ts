@@ -177,6 +177,8 @@ export interface CodexChatReasoning {
   outputFormat?: CodexChatReasoningOutputFormat;
 }
 
+export type PromptCacheRoutingMode = "auto" | "enabled" | "disabled";
+
 export interface LocalProxyRequestOverrides {
   headers?: Record<string, string>;
   body?: Record<string, unknown>;
@@ -224,6 +226,9 @@ export interface ProviderMeta {
   isFullUrl?: boolean;
   // Prompt cache key for OpenAI Responses-compatible endpoints (improves cache hit rate)
   promptCacheKey?: string;
+  // Session-based prompt-cache routing for Codex Responses -> Chat conversions.
+  // auto enables only for known-compatible upstreams; enabled/disabled are user overrides.
+  promptCacheRouting?: PromptCacheRoutingMode;
   // Codex OAuth FAST mode: injects service_tier="priority" on ChatGPT Codex requests
   codexFastMode?: boolean;
   // Codex Responses -> Chat Completions reasoning capability metadata
@@ -273,9 +278,9 @@ export interface CodexCatalogModel {
   model: string;
   displayName?: string;
   contextWindow?: string | number;
-  // Native Responses (direct) profile overrides for the generated
-  // model-catalogs.json. Ignored by the chat/proxy profile.
-  // e.g. MiniMax: supportsParallelToolCalls=true, inputModalities=["text","image"].
+  // Hidden provider capability metadata for the generated model catalog.
+  // supportsParallelToolCalls is native-profile-only; inputModalities wins over
+  // automatic text-only model detection for every profile.
   supportsParallelToolCalls?: boolean;
   inputModalities?: string[];
   // Vendor's OFFICIAL base_instructions (model identity / system preamble).
@@ -379,6 +384,8 @@ export interface Settings {
   streamCheckConfirmed?: boolean;
   // Whether to show the failover toggle independently on the main page
   enableFailoverToggle?: boolean;
+  // Whether to show the project profile switcher on the main page header
+  showProfileSwitcher?: boolean;
   // Preserve Codex ChatGPT login in auth.json when switching third-party providers
   preserveCodexOfficialAuthOnSwitch?: boolean;
   // Run official Codex under the shared "custom" provider id so future

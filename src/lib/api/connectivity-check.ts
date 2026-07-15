@@ -41,7 +41,7 @@ export async function streamCheckProvider(
 }
 
 /**
- * 批量流式健康检查
+ * 批量连通性检查
  */
 export async function streamCheckAllProviders(
   appType: AppId,
@@ -51,14 +51,14 @@ export async function streamCheckAllProviders(
 }
 
 /**
- * 获取流式检查配置
+ * 获取连通性检查配置
  */
 export async function getStreamCheckConfig(): Promise<StreamCheckConfig> {
   return invoke("get_stream_check_config");
 }
 
 /**
- * 保存流式检查配置
+ * 保存连通性检查配置
  */
 export async function saveStreamCheckConfig(
   config: StreamCheckConfig,
