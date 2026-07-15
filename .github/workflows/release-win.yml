@@ -1,8 +1,8 @@
 name: Release (Windows)
 
 # 精简版 Windows 发布构建：手动触发或推送 v* tag 触发。
-# 只构建 Windows x64，跳过所有代码签名（fork 无 signing secrets）。
-# 通过 --config 覆盖关闭 createUpdaterArtifacts，避免 Tauri 要求 signing key。
+# 只构建 Windows x64，并生成由 fork 自有密钥签名的 Tauri Updater 制品。
+# 推送 v* tag 时同时发布 latest.json，供应用内检查更新使用。
 
 on:
   push:
@@ -42,13 +42,43 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare Tauri updater signing key
+        shell: bash
+        env:
+          RAW_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RAW_SIGNING_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY Secret is required" >&2
+            exit 1
+          fi
+
+          RAW="$RAW_SIGNING_KEY"
+          KEY_PATH="$RUNNER_TEMP/tauri_signing.key"
+          if echo "$RAW" | head -n1 | grep -q '^untrusted comment:'; then
+            printf '%s\n' "$RAW" > "$KEY_PATH"
+          elif DECODED=$(printf '%s' "$RAW" | base64 --decode 2>/dev/null) \
+            && echo "$DECODED" | head -n1 | grep -q '^untrusted comment:'; then
+            printf '%s\n' "$DECODED" > "$KEY_PATH"
+          elif echo "$RAW" | grep -Eq '^[A-Za-z0-9+/=]+$'; then
+            printf '%s\n%s\n' 'untrusted comment: tauri signing key' "$RAW" > "$KEY_PATH"
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY has an unsupported format" >&2
+            exit 1
+          fi
+
+          KEY_B64=$(base64 < "$KEY_PATH" | tr -d '\r\n')
+          echo "TAURI_SIGNING_PRIVATE_KEY=$KEY_B64" >> "$GITHUB_ENV"
+          if [ -n "$SIGNING_KEY_PASSWORD" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
+          fi
+
       - name: Build Tauri App (Windows x64)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # 用配置文件而非内联 JSON，避免 pwsh 把 --config 参数里的引号拆碎
-          '{"bundle":{"createUpdaterArtifacts":false}}' | Out-File -FilePath ci-tauri.conf.json -Encoding utf8
-          pnpm tauri build --config ci-tauri.conf.json
+          pnpm tauri build
 
       - name: Prepare Windows Assets
         shell: pwsh
@@ -65,8 +95,14 @@ jobs:
             $dest = "CC-Switch-$VERSION-Windows.msi"
             Copy-Item $msi.FullName (Join-Path release-assets $dest)
             Write-Host "MSI copied: $dest"
+            $sigPath = "$($msi.FullName).sig"
+            if (-not (Test-Path $sigPath)) {
+              throw "Tauri updater signature not found for $($msi.Name)"
+            }
+            Copy-Item $sigPath (Join-Path release-assets "$dest.sig")
+            Write-Host "Updater signature copied: $dest.sig"
           } else {
-            Write-Warning 'No MSI installer found'
+            throw 'No MSI installer found'
           }
 
           # NSIS 安装器
@@ -130,12 +166,40 @@ jobs:
         shell: bash
         run: ls -la release-assets
 
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = '${{ github.ref_name }}'
+          $version = $tag -replace '^v', ''
+          $signatureFile = Get-ChildItem -LiteralPath release-assets -Filter '*-Windows.msi.sig' | Select-Object -First 1
+          if ($null -eq $signatureFile) {
+            throw 'No signed Windows MSI updater artifact found'
+          }
+
+          $installerName = $signatureFile.Name -replace '\.sig$', ''
+          $signature = (Get-Content -LiteralPath $signatureFile.FullName -Raw -Encoding UTF8).Trim()
+          $url = "https://github.com/${{ github.repository }}/releases/download/$tag/$installerName"
+          $manifest = [ordered]@{
+            version = $version
+            notes = "Release $tag"
+            pub_date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            platforms = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                signature = $signature
+                url = $url
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath 'release-assets/latest.json' -Encoding UTF8
+          Get-Content -LiteralPath 'release-assets/latest.json' -Encoding UTF8
+
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: CC Switch ${{ github.ref_name }}
-          prerelease: true
+          prerelease: false
           body: |
             ## CC Switch ${{ github.ref_name }}
 
