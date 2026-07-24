@@ -255,7 +255,7 @@ impl StreamCheckService {
                 )
                 .await
             }
-            AppType::Codex => {
+            AppType::Codex | AppType::GrokBuild => {
                 if crate::proxy::providers::codex_provider_uses_anthropic(provider) {
                     // Codex always speaks Responses to the local proxy, but an Anthropic
                     // provider's real upstream expects /v1/messages. Probe that upstream
@@ -1494,9 +1494,11 @@ impl StreamCheckService {
                 Self::extract_env_model(provider, "ANTHROPIC_MODEL")
                     .unwrap_or_else(|| config.claude_model.clone())
             }
-            AppType::Codex => crate::proxy::providers::codex_provider_upstream_model(provider)
-                .or_else(|| Self::extract_codex_model(provider))
-                .unwrap_or_else(|| config.codex_model.clone()),
+            AppType::Codex | AppType::GrokBuild => {
+                crate::proxy::providers::codex_provider_upstream_model(provider)
+                    .or_else(|| Self::extract_codex_model(provider))
+                    .unwrap_or_else(|| config.codex_model.clone())
+            }
             AppType::Gemini => Self::extract_env_model(provider, "GEMINI_MODEL")
                 .unwrap_or_else(|| config.gemini_model.clone()),
             AppType::OpenCode => {
@@ -1756,6 +1758,33 @@ mod tests {
                 &StreamCheckConfig::default(),
             ),
             "claude-sonnet-5[1m]"
+        );
+    }
+
+    #[test]
+    fn test_grokbuild_test_model_uses_selected_upstream_model() {
+        let provider = make_provider(serde_json::json!({
+            "config": r#"
+[models]
+default = "grok-profile"
+
+[model.grok-profile]
+model = "grok-upstream"
+base_url = "https://api.example.com/v1"
+name = "Example"
+api_key = "secret"
+api_backend = "responses"
+context_window = 500000
+"#
+        }));
+
+        assert_eq!(
+            StreamCheckService::resolve_test_model(
+                &AppType::GrokBuild,
+                &provider,
+                &StreamCheckConfig::default(),
+            ),
+            "grok-upstream"
         );
     }
 
