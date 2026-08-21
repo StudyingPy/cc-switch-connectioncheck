@@ -28,8 +28,8 @@ This key has no password, so `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` is not needed.
 3. Create and push the matching `v*` tag.
 
 ```powershell
-git tag v3.19.2
-git push origin v3.19.2
+git tag v3.20.0
+git push origin v3.20.0
 ```
 
 `Release (Windows)` then builds the signed MSI, publishes a normal GitHub
