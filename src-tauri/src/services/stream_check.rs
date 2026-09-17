@@ -205,6 +205,17 @@ impl StreamCheckService {
     ) -> Result<StreamCheckResult, AppError> {
         let start = Instant::now();
 
+        // MiniMax Code uses its own native provider schema and does not yet have
+        // a real-request protocol route in this fork. Keep the backend guarded
+        // even though the provider-card action is hidden in the frontend.
+        if matches!(app_type, AppType::Mcode) {
+            return Err(AppError::localized(
+                "mcode_stream_check_not_supported",
+                "MiniMax Code 暂不支持真实流式连通性检测，请直接通过 MiniMax Code 验证供应商。",
+                "Real streaming checks are not yet supported for MiniMax Code. Please verify the provider directly in MiniMax Code.",
+            ));
+        }
+
         // OpenCode / OpenClaw / Hermes / Pi 的 settings_config 结构与
         // Claude/Codex/Gemini 不同
         // （baseUrl / apiKey 直接作为根字段而非嵌套在 env），并且协议由 `api`
@@ -304,9 +315,15 @@ impl StreamCheckService {
                 )
                 .await
             }
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes | AppType::Pi => {
+            AppType::OpenCode
+            | AppType::OpenClaw
+            | AppType::Hermes
+            | AppType::Pi
+            | AppType::Mcode => {
                 // Already handled via early dispatch above
-                unreachable!("OpenCode/OpenClaw/Hermes/Pi 已通过 check_once_without_adapter 处理")
+                unreachable!(
+                    "OpenCode/OpenClaw/Hermes/Pi/Mcode 已在 adapter 分发前处理"
+                )
             }
         };
 
@@ -1507,8 +1524,8 @@ impl StreamCheckService {
             }
             AppType::Gemini => Self::extract_env_model(provider, "GEMINI_MODEL")
                 .unwrap_or_else(|| config.gemini_model.clone()),
-            AppType::OpenCode => {
-                // OpenCode uses models map in settings_config
+            AppType::OpenCode | AppType::Mcode => {
+                // OpenCode and Mcode use a models map in settings_config
                 // Try to extract first model from the models object
                 Self::extract_opencode_model(provider).unwrap_or_else(|| "gpt-4o".to_string())
             }
