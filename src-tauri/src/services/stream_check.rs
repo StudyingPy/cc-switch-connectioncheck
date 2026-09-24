@@ -321,9 +321,7 @@ impl StreamCheckService {
             | AppType::Pi
             | AppType::Mcode => {
                 // Already handled via early dispatch above
-                unreachable!(
-                    "OpenCode/OpenClaw/Hermes/Pi/Mcode 已在 adapter 分发前处理"
-                )
+                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode 已在 adapter 分发前处理")
             }
         };
 
