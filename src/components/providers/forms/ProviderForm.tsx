@@ -238,6 +238,11 @@ const normalizeCodexChatReasoningForSave = (
 const normalizeProviderKey = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9-]/g, "");
 
+const normalizePricingSource = (
+  value: string | undefined,
+): PricingModelSourceOption =>
+  value === "request" || value === "response" ? value : "inherit";
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
