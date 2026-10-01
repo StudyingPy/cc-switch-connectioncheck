@@ -24,6 +24,5 @@ meta: {"commonConfigEnabled":true}
 is_current: true
 in_failover_queue: false
 
-
 common config snippet: [projects."/Users/me/repo"]
 trust_level = "trusted"

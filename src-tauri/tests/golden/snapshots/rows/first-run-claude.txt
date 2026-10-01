@@ -24,7 +24,6 @@ meta: {"commonConfigEnabled":true}
 is_current: true
 in_failover_queue: false
 
-
 common config snippet: {
   "env": {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"

@@ -24,5 +24,4 @@ meta: {}
 is_current: false
 in_failover_queue: false
 
-
 common config snippet: NULL

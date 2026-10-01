@@ -191,6 +191,9 @@ pub fn dump_provider_rows(
         let (provider_id, url) = endpoint.expect("read endpoint row");
         out.push_str(&format!("endpoint: {} {url}\n", id_filter(&provider_id)));
     }
+    if out.ends_with("\n\n") {
+        out.pop();
+    }
     out
 }
 
