@@ -249,8 +249,8 @@ impl StreamCheckService {
             .or_else(|| adapter.extract_auth(provider))
             .ok_or_else(|| AppError::Message("API Key not found".to_string()))?;
 
-        // 获取 HTTP 客户端
-        let client = crate::proxy::http_client::get();
+        // 获取 HTTP 客户端，并按真实上游 URL 套用 no_proxy 规则。
+        let client = crate::proxy::http_client::get_for_url(&base_url);
         let request_timeout = std::time::Duration::from_secs(config.timeout_secs);
 
         let model_to_test = Self::resolve_test_model(app_type, provider, config);
@@ -822,7 +822,7 @@ impl StreamCheckService {
         config: &StreamCheckConfig,
         start: Instant,
     ) -> Result<StreamCheckResult, AppError> {
-        // 获取 HTTP 客户端
+        // 这些应用会在各自的分发函数中解析 URL，此处尚无单一 base_url。
         let client = crate::proxy::http_client::get();
         let request_timeout = std::time::Duration::from_secs(config.timeout_secs);
 
