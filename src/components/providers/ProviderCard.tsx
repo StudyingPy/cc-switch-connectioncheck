@@ -572,10 +572,12 @@ export function ProviderCard({
               onTest &&
               appId !== "mcode" &&
               appId !== "agy" &&
+              appId !== "kimi" &&
               !isOfficial &&
               !isCopilot &&
               !isCodexOauth &&
-              !isClaudeThirdParty
+              !isClaudeThirdParty &&
+              provider.category !== "official"
                 ? () => onTest(provider)
                 : undefined
             }
