@@ -208,11 +208,23 @@ impl StreamCheckService {
         // MiniMax Code uses its own native provider schema and does not yet have
         // a real-request protocol route in this fork. Keep the backend guarded
         // even though the provider-card action is hidden in the frontend.
-        if matches!(app_type, AppType::Mcode) {
+        if matches!(app_type, AppType::Mcode | AppType::Kimi) {
             return Err(AppError::localized(
-                "mcode_stream_check_not_supported",
-                "MiniMax Code 暂不支持真实流式连通性检测，请直接通过 MiniMax Code 验证供应商。",
-                "Real streaming checks are not yet supported for MiniMax Code. Please verify the provider directly in MiniMax Code.",
+                if matches!(app_type, AppType::Kimi) {
+                    "kimi_stream_check_not_supported"
+                } else {
+                    "mcode_stream_check_not_supported"
+                },
+                if matches!(app_type, AppType::Kimi) {
+                    "Kimi Code 暂不支持真实流式连通性检测，请直接通过 Kimi Code 验证供应商。"
+                } else {
+                    "MiniMax Code 暂不支持真实流式连通性检测，请直接通过 MiniMax Code 验证供应商。"
+                },
+                if matches!(app_type, AppType::Kimi) {
+                    "Real streaming checks are not yet supported for Kimi Code. Please verify the provider directly in Kimi Code."
+                } else {
+                    "Real streaming checks are not yet supported for MiniMax Code. Please verify the provider directly in MiniMax Code."
+                },
             ));
         }
 
@@ -332,9 +344,10 @@ impl StreamCheckService {
             | AppType::Hermes
             | AppType::Pi
             | AppType::Mcode
-            | AppType::Agy => {
+            | AppType::Agy
+            | AppType::Kimi => {
                 // Already handled via early dispatch above
-                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode/Agy 已在 adapter 分发前处理")
+                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode/Agy/Kimi 已在 adapter 分发前处理")
             }
         };
 
@@ -1539,6 +1552,11 @@ impl StreamCheckService {
                 // OpenCode and Mcode use a models map in settings_config
                 // Try to extract first model from the models object
                 Self::extract_opencode_model(provider).unwrap_or_else(|| "gpt-4o".to_string())
+            }
+            AppType::Kimi => {
+                // Kimi is rejected before model resolution until its native protocol has
+                // a real stream-check request/parser in this fork.
+                config.claude_model.clone()
             }
             AppType::OpenClaw | AppType::Hermes | AppType::Pi => {
                 // OpenClaw/Hermes/Pi use models array in settings_config
