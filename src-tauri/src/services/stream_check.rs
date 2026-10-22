@@ -216,6 +216,18 @@ impl StreamCheckService {
             ));
         }
 
+        // Antigravity is another additive app, but its provider cards currently
+        // only have an upstream reachability probe. This fork promises a real
+        // model-stream check, so keep both the command and UI guarded until a
+        // protocol-aware request/parser path is implemented.
+        if matches!(app_type, AppType::Agy) {
+            return Err(AppError::localized(
+                "agy_stream_check_not_supported",
+                "Antigravity 暂不支持真实流式连通性检测，请直接通过 Antigravity CLI 验证供应商。",
+                "Real streaming checks are not yet supported for Antigravity. Please verify the provider directly in Antigravity CLI.",
+            ));
+        }
+
         // OpenCode / OpenClaw / Hermes / Pi 的 settings_config 结构与
         // Claude/Codex/Gemini 不同
         // （baseUrl / apiKey 直接作为根字段而非嵌套在 env），并且协议由 `api`
@@ -319,9 +331,10 @@ impl StreamCheckService {
             | AppType::OpenClaw
             | AppType::Hermes
             | AppType::Pi
-            | AppType::Mcode => {
+            | AppType::Mcode
+            | AppType::Agy => {
                 // Already handled via early dispatch above
-                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode 已在 adapter 分发前处理")
+                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode/Agy 已在 adapter 分发前处理")
             }
         };
 
@@ -1520,7 +1533,7 @@ impl StreamCheckService {
                     .or_else(|| Self::extract_codex_model(provider))
                     .unwrap_or_else(|| config.codex_model.clone())
             }
-            AppType::Gemini => Self::extract_env_model(provider, "GEMINI_MODEL")
+            AppType::Gemini | AppType::Agy => Self::extract_env_model(provider, "GEMINI_MODEL")
                 .unwrap_or_else(|| config.gemini_model.clone()),
             AppType::OpenCode | AppType::Mcode => {
                 // OpenCode and Mcode use a models map in settings_config
