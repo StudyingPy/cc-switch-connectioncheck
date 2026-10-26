@@ -240,6 +240,18 @@ impl StreamCheckService {
             ));
         }
 
+        // Oh My Pi resolves apiKey values through process/.env lookup and also
+        // allows protocol/base URL overrides at model level. Until those native
+        // semantics are mirrored by a real request path, do not fall back to the
+        // upstream reachability-only probe or send an unresolved key name.
+        if matches!(app_type, AppType::Omp) {
+            return Err(AppError::localized(
+                "omp_stream_check_not_supported",
+                "Oh My Pi 暂不支持真实流式连通性检测，请直接通过 Oh My Pi 验证供应商。",
+                "Real streaming checks are not yet supported for Oh My Pi. Please verify the provider directly in Oh My Pi.",
+            ));
+        }
+
         // OpenCode / OpenClaw / Hermes / Pi 的 settings_config 结构与
         // Claude/Codex/Gemini 不同
         // （baseUrl / apiKey 直接作为根字段而非嵌套在 env），并且协议由 `api`
@@ -345,9 +357,12 @@ impl StreamCheckService {
             | AppType::Pi
             | AppType::Mcode
             | AppType::Agy
-            | AppType::Kimi => {
+            | AppType::Kimi
+            | AppType::Omp => {
                 // Already handled via early dispatch above
-                unreachable!("OpenCode/OpenClaw/Hermes/Pi/Mcode/Agy/Kimi 已在 adapter 分发前处理")
+                unreachable!(
+                    "OpenCode/OpenClaw/Hermes/Pi/Mcode/Agy/Kimi/Omp 已在 adapter 分发前处理"
+                )
             }
         };
 
@@ -1553,9 +1568,9 @@ impl StreamCheckService {
                 // Try to extract first model from the models object
                 Self::extract_opencode_model(provider).unwrap_or_else(|| "gpt-4o".to_string())
             }
-            AppType::Kimi => {
-                // Kimi is rejected before model resolution until its native protocol has
-                // a real stream-check request/parser in this fork.
+            AppType::Kimi | AppType::Omp => {
+                // Kimi and Omp are rejected before model resolution until their native
+                // protocols have a real stream-check request/parser in this fork.
                 config.claude_model.clone()
             }
             AppType::OpenClaw | AppType::Hermes | AppType::Pi => {
